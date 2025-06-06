@@ -1,103 +1,173 @@
-import Image from "next/image";
+// app/instagram-album/page.tsx
+'use client';
+import CodeBlock from '@/components/CodeBlock';
+import { useEffect, useState } from 'react';
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { experimental_useObject as useObject } from '@ai-sdk/react';
+import z from 'zod';
+import { slideSchema } from './api/chat/route';
 
-export default function Home() {
+export default function InstagramAlbumPoster() {
+  const { object, submit } = useObject({
+    api: '/api/chat',
+    schema: z.object({
+      slides: z.array(slideSchema),
+    }),
+  })
+  const [prompt, setPrompt] = useState('');
+  const [isPosting, setIsPosting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [images, setImages] = useState<{ url: string; slideNumber: string }[]>([]);
+  const [result, setResult] = useState<any>(null);
+
+  const handleImageGenerated = (url: string, slideNumber: string) => {
+    console.log('Image generated for slide', slideNumber, 'URL length:', url.length);
+    setImages(prev => {
+      // Avoid duplicates
+      if (prev.some(img => img.slideNumber === slideNumber)) {
+        return prev;
+      }
+      console.log('Adding image to state, total images:', prev.length + 1);
+      return [...prev, { url, slideNumber }];
+    });
+  };
+
+  const uploadAllImagesToPinata = async (images: { url: string; slideNumber: string }[]) => {
+    setIsDownloading(true);
+
+    const uploadedImages: { url: string; slideNumber: string }[] = [];
+
+    for (const { url, slideNumber } of images) {
+      const res = await fetch(url);
+      const blob = await res.blob();
+
+      const formData = new FormData();
+      formData.append('file', blob, `slide${slideNumber}.png`);
+
+      const metadata = JSON.stringify({
+        name: `slide${slideNumber}`,
+      });
+      formData.append('pinataMetadata', metadata);
+
+      const pinataOptions = JSON.stringify({
+        cidVersion: 1,
+      });
+      formData.append('pinataOptions', pinataOptions);
+
+      const uploadRes = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_PINATA_JWT}`, // Use .env for secret
+        },
+        body: formData,
+      });
+
+      const json = await uploadRes.json();
+      const ipfsUrl = `https://gateway.pinata.cloud/ipfs/${json.IpfsHash}`;
+
+      uploadedImages.push({ url: ipfsUrl, slideNumber });
+    }
+
+    setIsDownloading(false);
+    postAlbum(uploadedImages);
+  };
+
+
+  const postAlbum = async (uploadedImages: { url: string; slideNumber: string }[]) => {
+    setIsPosting(true);
+
+    const pinataPaths = uploadedImages.map(({ url }) => ({
+      url,
+      type: 'photo',
+    }));
+
+    try {
+      const response = await fetch('/api/instagram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caption: `
+          Post by: @amardeep.webdev
+
+-——————————————— !! FOLLOW US TO LEARN ALL ABOUT WEB DEVELOPMENT !! -——————————————— #webdevelopment #programminglife #codingbootcamp #codingmemes #weprogrammers #frontendchallenge #fullstack #backend #programmingmemes #pythonprogramming #javascripts #webdevelopmentcompany #100dayproject #css #javaprogramming #codegeass #freecodecamp #codetutorials #appdeveloper #amardeep.webdev #webdesign #webdesignanddevelopment -———————————————
+
+Removal of the post could be requested by the Copyright Holder of the property through DM.
+
+©️ No Copyright infringement intended.
+          `,
+          items: pinataPaths,
+          location: {
+            name: 'Times Square',
+            lat: 40.7580,
+            lng: -73.9855,
+          },
+        }),
+      });
+
+      setResult(await response.json());
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  console.log('Rendering page. Total slides:', object?.slides?.length, 'Generated images:', images.length);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="p-4">
+      <div className="flex gap-4 mb-4">
+        <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+        <button onClick={() => submit(prompt)}>Generate</button>
+        <button
+          onClick={() => uploadAllImagesToPinata(images)}
+          disabled={isDownloading || images.length === 0}
+          className={`px-4 py-2 rounded ${images.length === 0 ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
+        >
+          {isDownloading ? 'Downloading...' : `Download All Slides (${images.length})`}
+        </button>
+        <button
+          onClick={() => postAlbum(images)}
+          disabled={images.length === 0}
+          className={`px-4 py-2 rounded ${images.length === 0 ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'} text-white`}
+        >
+          {isPosting ? 'Posting...' : `Post Album (${images.length}/${object?.slides?.length} ready)`}
+        </button>
+      </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      {result && <SyntaxHighlighter language="json" style={dracula} customStyle={{
+      }} className="mt-4 p-4 bg-gray-900 rounded">{JSON.stringify(result, null, 2)}</SyntaxHighlighter>}
+
+      <div className="grid gap-4">
+        {object?.slides?.map((slide, index) => {
+          console.log(`Rendering slide ${index} (${slide?.slideNumber})`);
+          return (
+            <div key={index} className="relative border rounded-lg p-2">
+              <CodeBlock title={slide?.title || 'Untitled'}  // Provide a default title
+                code={slide?.code || ''}
+                slideNumber={slide?.slideNumber || ''}
+                onImageGenerated={handleImageGenerated} />
+              <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+                {images.some(img => img.slideNumber === slide?.slideNumber) ? '✅ Ready' : '⏳ Generating...'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 p-4 bg-gray-900 rounded">
+        <h3 className="font-bold mb-2">Debug Info:</h3>
+        <SyntaxHighlighter language="json" style={dracula} customStyle={{
+        }} className="text-xs">
+          {JSON.stringify({
+            totalSlides: object?.slides?.length,
+            generatedImages: images.length,
+            slideNumbers: object?.slides?.map(s => s?.slideNumber),
+            generatedSlideNumbers: images.map(i => i.slideNumber)
+          }, null, 2)}
+        </SyntaxHighlighter>
+      </div>
+
+     
     </div>
   );
 }
