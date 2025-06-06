@@ -6,7 +6,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { experimental_useObject as useObject } from '@ai-sdk/react';
 import z from 'zod';
-import { slideSchema } from './api/chat/route';
+import { slideSchema } from './api/chat/schema';
 
 export default function InstagramAlbumPoster() {
   const { object, submit } = useObject({
